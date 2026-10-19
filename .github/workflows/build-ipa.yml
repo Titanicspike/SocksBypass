@@ -7,30 +7,40 @@ jobs:
   build:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Use latest stable Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
 
-      - name: Show Xcode version and schemes
+      - name: Detect scheme
         run: |
           xcodebuild -version
           xcodebuild -list -project SocksBypass.xcodeproj
+          SCHEME=$(xcodebuild -list -json -project SocksBypass.xcodeproj | python3 -c "import json,sys; s=json.load(sys.stdin)['project']['schemes']; print('SocksBypass' if 'SocksBypass' in s else s[0])")
+          echo "Using scheme: $SCHEME"
+          echo "SCHEME=$SCHEME" >> "$GITHUB_ENV"
 
       - name: Build (unsigned)
         run: |
+          set -o pipefail
           xcodebuild build \
             -project SocksBypass.xcodeproj \
-            -scheme SocksBypass \
+            -scheme "$SCHEME" \
             -configuration Release \
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
             -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY=""
+            CODE_SIGN_IDENTITY="" 2>&1 | tee build.log
+
+      - name: Show build errors
+        if: failure()
+        run: |
+          echo "==== Errors from build.log ===="
+          grep -nE "error:|BUILD FAILED|The following build commands failed" -A 3 build.log | head -n 80 || echo "No build.log or no error lines found"
 
       - name: Package IPA
         run: |
@@ -40,7 +50,7 @@ jobs:
           cp -R "$APP_PATH" Payload/
           zip -qry SocksBypass-unsigned.ipa Payload
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: SocksBypass-unsigned-ipa
           path: SocksBypass-unsigned.ipa
